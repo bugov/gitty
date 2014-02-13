@@ -1,26 +1,16 @@
 #!/usr/bin/perl
-
-use DBI;
 use utf8;
 use strict;
 use warnings;
 use feature ':5.10';
+
+use DBI;
 use Mojolicious::Lite;
 use Digest::MD5 qw(md5_hex);
 use Data::Dumper;
-use constant { true => 1, false => 0 };
 
-our $VERSION = '1.beta';
-
-
-#--------------------------------------------------------------------- Init --#
-
-our $dbh = DBI->connect("dbi:SQLite:dbname=./gitty.db",
-                        '', '', { RaiseError => 1 })
-            or die $DBI::errstr;
-
-
-#-------------------------------------------------------------- Controllers --#
+our $VERSION = '1.00';
+our $dbh = DBI->connect("dbi:SQLite:dbname=./gitty.db", '', '', { RaiseError => 1 }) or die $DBI::errstr;
 
 get '/' => sub {
   my $self = shift;
@@ -31,14 +21,11 @@ get '/' => sub {
   return $self->stash({hi => $hi[int rand scalar @hi]})->render('index');
 };
 
-
 get '/install' => sub {
   my $self = shift;
   my $error = $self->param('error') || '';
-  $self->stash({salt => md5_hex(rand), secret_key => md5_hex(rand),
-                error => $error})->render('install');
+  $self->stash({salt => md5_hex(rand), secret_key => md5_hex(rand), error => $error})->render('install');
 };
-
 
 post '/install' => sub {
   my $self = shift;
@@ -55,80 +42,24 @@ post '/install' => sub {
   return $self->redirect_to('/install?error=bad_params') if $gl_dir =~ /'/;
   return $self->redirect_to('/install?error=bad_params') if $pass ne $pass2;
   
-  Model->new->raw(q{
-    CREATE TABLE config (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name VARCHAR(32) UNIQUE,
-      value TEXT
-    );
-  });
+  Model->new->raw(q{CREATE TABLE config (id INTEGER PRIMARY KEY AUTOINCREMENT,name VARCHAR(32) UNIQUE,value TEXT);});
   Model->new->raw(qq{INSERT INTO config VALUES(1, 'salt'      , '$salt');});
   Model->new->raw(qq{INSERT INTO config VALUES(2, 'secret_key', '$secret_key');});
   Model->new->raw(qq{INSERT INTO config VALUES(3, 'gl_dir'    , '$gl_dir');});
-  
-  Model->new->raw(q{
-    CREATE TABLE user (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name VARCHAR(32) UNIQUE,
-      mail VARCHAR(32) UNIQUE,
-      password VARCHAR(32),
-      regdate INTEGER,
-      key_count INTEGER,
-      info TEXT
-    );
-  });
-  Model->new->raw(qq{
-    INSERT INTO user VALUES(1, 'admin', 'admin\@gitty',
-      '$admin_password_hash', $time, 0, 'Gitty Admin');
-  });
-  
-  Model->new->raw(q{
-    CREATE TABLE key (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER,
-      name VARCHAR(32),
-      key TEXT,
-      FOREIGN KEY(user_id) REFERENCES user(id)
-    );
-  });
-  
-  Model->new->raw(q{
-    CREATE TABLE 'group' (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name VARCHAR(32) UNIQUE,
-      list TEXT
-    );
-  });
-  
-  Model->new->raw(q{
-    CREATE TABLE repo (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name VARCHAR(32) UNIQUE,
-      list TEXT
-    );
-  });
-  #say Model->new('config')->read(name => 'secret_key')->{value};
-  #app->secret( Model->new('config')->read(name => 'secret_key')->{value} );
-  $self->session(id => 1, name => 'admin', mail => 'admin@gitty',
-                 regdate => $time, key_count => 0);
+  Model->new->raw(q{CREATE TABLE user (id INTEGER PRIMARY KEY AUTOINCREMENT,name VARCHAR(32) UNIQUE,
+    mail VARCHAR(32) UNIQUE,password VARCHAR(32),regdate INTEGER,key_count INTEGER,info TEXT);});
+  Model->new->raw(qq{INSERT INTO user VALUES(1, 'admin', 'admin\@gitty','$admin_password_hash', $time, 0, 'Gitty Admin');});
+  Model->new->raw(q{CREATE TABLE key (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,
+    name VARCHAR(32),key TEXT,FOREIGN KEY(user_id) REFERENCES user(id));});
+  Model->new->raw(q{CREATE TABLE 'group' (id INTEGER PRIMARY KEY AUTOINCREMENT,name VARCHAR(32) UNIQUE,list TEXT);});
+  Model->new->raw(q{CREATE TABLE repo (id INTEGER PRIMARY KEY AUTOINCREMENT,name VARCHAR(32) UNIQUE,list TEXT);});
+  $self->session(id => 1, name => 'admin', mail => 'admin@gitty', regdate => $time, key_count => 0);
   
   return $self->redirect_to('/admin');
 };
 
-
-get '/user/login' => sub {
-  my $self = shift;
-  $self->stash({error => ''});
-  $self->render('user/login');
-};
-
-
-get '/user/logout' => sub {
-  my $self = shift;
-  $self->session(id => 0);
-  $self->redirect_to('/');
-};
-
+get '/user/login' => sub { shift->render('user/login', error => '') };
+get '/user/logout' => sub { shift->session(id => 0)->redirect_to('/') };
 
 post '/user/login' => sub {
   my $self = shift;
@@ -138,21 +69,16 @@ post '/user/login' => sub {
   
   if ($user) {
     my $salt = Model->new('config')->read(name => 'salt')->{value};
-    
     if ($user->{password} eq md5_hex("$salt-".$user->{regdate}."-$pass")) {
       $self->session(id => $user->{id}, name => $user->{name},
-                     mail => $user->{mail}, regdate => $user->{regdate},
-                     key_count => $user->{key_count});
-      
-      $user->{id} == 1? $self->redirect_to('/admin') :
-                        $self->redirect_to('/user/home');
+         mail => $user->{mail}, regdate => $user->{regdate},
+         key_count => $user->{key_count});
+      $user->{id} == 1? $self->redirect_to('/admin') : $self->redirect_to('/user/home');
     } else {
-      $self->stash({error => q/Wrong password!/});
-      $self->render('user/login');
+      $self->stash({error => q/Wrong password!/})->render('user/login');
     }
   } else {
-    $self->stash({error => q/Can't find user!/});
-    $self->render('user/login');
+    $self->stash({error => q/Can't find user!/})->render('user/login');
   }
 };
 
@@ -160,12 +86,7 @@ post '/user/login' => sub {
 #------------------------------------------------------------- User section --#
 
 group {
-  under '/user' => sub {
-    my $self = shift;
-    return true if access('user', $self->session('id'));
-    return false;
-  };
-  
+  under '/user' => sub { access('user', shift->session('id')) ? 1 : 0 };
   
   get '/home' => sub {
     my $self = shift;
@@ -173,7 +94,6 @@ group {
     my $user = Model->new('user')->read(id => $user_id);
     $self->stash({user => $user})->render('user/home');
   };
-  
   
   post '/home' => sub {
     my $self = shift;
@@ -191,13 +111,11 @@ group {
     $self->redirect_to('/user/home');
   };
   
-  
   get '/keys' => sub {
     my $self = shift;
     my @keys = Model->new('key')->list({user_id => $self->session('id')});
     $self->stash({keys => \@keys})->render('user/keys');
   };
-  
   
   post '/keys' => sub {
     my $self = shift;
@@ -220,25 +138,15 @@ group {
 #------------------------------------------------------------ Admin section --#
 
 group {
-  under '/admin' => sub {
-    my $self = shift;
-    return true if access('admin', $self->session('id'));
-    return false;
-  };
+  under '/admin' => sub { access('admin', shift->session('id')) ? 1 : 0 };
   
-  
-  get '/' => sub {
-    my $self = shift;
-    $self->render('admin/index');
-  };
-  
+  get '/' => sub { shift->render('admin/index') };
   
   get '/users' => sub {
     my $self = shift;
     my @users = Model->new('user')->list;
     $self->stash({users => \@users})->render('admin/users');
   };
-  
   
   post '/users' => sub {
     my $self = shift;
@@ -256,14 +164,12 @@ group {
     $self->redirect_to('/admin/users');
   };
   
-  
   get '/repos' => sub {
     my $self = shift;
     my @groups = Model->new('group')->list;
     my @repos = Model->new('repo')->list;
     $self->stash({repos => \@repos, groups => \@groups})->render('admin/repos');
   };
-  
   
   post '/repos' => sub {
     my $self = shift;
@@ -280,13 +186,11 @@ group {
     $self->redirect_to('/admin/repos');
   };
   
-  
   get '/groups' => sub {
     my $self = shift;
     my @groups = Model->new('group')->list;
     $self->stash({groups => \@groups})->render('admin/groups');
   };
-  
   
   post '/groups' => sub {
     my $self = shift;
@@ -303,13 +207,11 @@ group {
     $self->redirect_to('/admin/groups');
   };
   
-  
   get '/config/startup' => sub {
     my $self = shift;
     my ($groups, $repos) = parse_gitolite_config();
     $self->stash({groups => $groups, repos => $repos})->render('admin/startup');
   };
-  
   
   # Load startup-config.
   post '/config/startup' => sub {
@@ -319,15 +221,12 @@ group {
     $self->redirect_to('/admin/config/running');
   };
   
-  
   get '/config/gitty' => sub {
     my $self = shift;
     my $secret_key = Model->new('config')->read({name => 'secret_key'})->{value};
     my $gl_dir = Model->new('config')->read({name => 'gl_dir'})->{value};
-    $self->stash({secret_key => $secret_key, gl_dir => $gl_dir})
-      ->render('admin/gitty');
+    $self->render('admin/gitty', secret_key => $secret_key, gl_dir => $gl_dir);
   };
-  
   
   post '/config/gitty' => sub {
     my $self = shift;
@@ -338,16 +237,12 @@ group {
     $self->redirect_to('/admin/config/gitty');
   };
   
-  
   get '/config/running' => sub {
     my $self = shift;
     my ($groups, $repos) = get_gitolite_config_from_db();
     my $text = generate_gitolite_config($groups, $repos);
-    
-    $self->stash({groups => $groups, repos => $repos, conf => $text})
-      ->render('admin/running');
+    $self->render('admin/running', groups => $groups, repos => $repos, conf => $text);
   };
-  
   
   # Save running-config to startup-config.
   post '/config/running/to/startup' => sub {
@@ -366,7 +261,6 @@ group {
     $self->redirect_to('/admin/config/running');
   };
   
-  
   post '/config/running' => sub {
     my $self = shift;
     my $conf = $self->param('conf');
@@ -384,13 +278,9 @@ app->start;
 sub access {
   my $level = shift || 'user'; # required access level
   my $user_id = shift || 0;
-  
-  given($level) {
-    when('user') { return true if $user_id }
-    when('admin') { return true if $user_id == 1 }
-  }
-  
-  return false;
+  return 1 if $user_id && $level eq 'user';
+  return 1 if $user_id == 1 && $level eq 'admin';
+  return 0;
 }
 
 
@@ -398,12 +288,9 @@ sub push_admin_config {
   my $self = shift;
   my $gl_dir = Model->new('config')->read(name => 'gl_dir')->{value};
   save_keys_to_fs();
-  
-  app->log->warn(
-    "Update admin config...\n" .
+  app->log->warn("Update admin config...\n" .
     `cd $gl_dir && git add . && git commit -m 'update' && git push`);
 }
-
 
 sub parse_gitolite_config {
   my @CONFIG;
@@ -425,34 +312,31 @@ sub parse_gitolite_config {
   my $cur_repo = '';
   
   for my $line (@CONFIG) {
-    given($line) {
-      # group definition
-      when(/^\s*@($expr)\s*=\s*($expr(?:\s+$expr)*)\s+$/i) {
-        %groups = ( %groups, $1 => [split/ /, $2] );
+    # group definition
+    if ($line =~ /^\s*@($expr)\s*=\s*($expr(?:\s+$expr)*)\s+$/i) {
+      %groups = ( %groups, $1 => [split' ', $2] );
+    }
+    # repo definition
+    elsif($line =~ /^\s*repo\s+($expr)\s+$/) {
+      $cur_repo = $1;
+    }
+    # end of repo || just empty line
+    elsif($line =~ /^\s*$/) {
+      $cur_repo = '';
+    }
+    # repo users
+    elsif($line =~ /^\s*([RW+\-CD]+)\s*=\s*($expr(?:\s+$expr)*)\s*$/) {
+      unless(exists $repos{$cur_repo}) {
+        %repos = (%repos, $cur_repo => { $1 => [split' ', $2] });
       }
-      # repo definition
-      when(/^\s*repo\s+($expr)\s+$/) {
-        $cur_repo = $1;
-      }
-      # end of repo || just empty line
-      when(/^\s*$/) {
-        $cur_repo = '';
-      }
-      # repo users
-      when(/^\s*([RW+\-CD]+)\s*=\s*($expr(?:\s+$expr)*)\s*$/) {
-        unless(exists $repos{$cur_repo}) {
-          %repos = (%repos, $cur_repo => { $1 => [split/ /, $2] });
-        }
-        else {
-          $repos{$cur_repo} = { %{ $repos{$cur_repo} }, $1 => [split/ /, $2] };
-        }
+      else {
+        $repos{$cur_repo} = { %{ $repos{$cur_repo} }, $1 => [split' ', $2] };
       }
     }
   }
   
   return(\%groups, \%repos);
 }
-
 
 sub get_gitolite_config_from_db {
   my @groups = Model->new('group')->list;
@@ -461,18 +345,17 @@ sub get_gitolite_config_from_db {
   my %repos;
   
   for my $g (@groups) {
-    %groups = ( %groups, $g->{name} => [split/ /, $g->{list}] );
+    %groups = ( %groups, $g->{name} => [split' ', $g->{list}] );
   }
   
   for my $r (@repos) {
     my $access = { split/\n/, $r->{list} };
-    $access->{$_} = [ split/ /, $access->{$_} ] for keys %$access;
+    $access->{$_} = [ split' ', $access->{$_} ] for keys %$access;
     %repos = (%repos, $r->{name} => $access);
   }
   
   return(\%groups, \%repos);
 }
-
 
 sub save_gitolite_config_to_db {
   my($groups, $repos) = @_;
@@ -554,15 +437,12 @@ sub new {
 sub create {
   my $self = shift;
   my $data = shift;
-  
   while(my($k, $v) = each %$data) {
       $data->{$k} = $main::dbh->quote($v);
   }
-  
   my $t = $self->{table};
   my $k = join '`,`', keys %$data;
   my $v = join ",", values %$data;
-  
   $main::dbh->do("INSERT INTO `$t`(`$k`) VALUES($v)");
   my $sth = $main::dbh->prepare("SELECT last_insert_rowid()");
      $sth->execute();
@@ -590,13 +470,11 @@ sub update {
 sub delete {
   my($self, $where) = @_;
   my @where;
-  
-  if ( $where ) {
+  if ($where) {
     @where = $self->_prepare($where);
   } else {
     push @where, '1=1';
   }
-  
   my $t = $self->{table};
   my $w = join ' and ', @where;
   $main::dbh->do("DELETE FROM `$t` WHERE $w");
@@ -615,8 +493,7 @@ sub list {
   my $w = ( $where ? join ' and ', $self->_prepare($where) : '1=1' );
   my $t = $self->{table};
   my $f = join ',', @$fields;
-  my $q = "SELECT $f FROM `$t` WHERE $w
-            ORDER BY $order $rule LIMIT $offset, $limit";
+  my $q = "SELECT $f FROM `$t` WHERE $w ORDER BY $order $rule LIMIT $offset, $limit";
   # run
   my $sth = $main::dbh->prepare($q);
      $sth->execute();
@@ -652,11 +529,9 @@ sub raw {
 sub _prepare {
   my($self, $data) = @_;
   my @data;
-  
   while(my($k, $v) = each %$data) {
     push @data, sprintf "`%s`=%s", $k, $main::dbh->quote($v);
   }
-  
   return @data;
 }
 
@@ -777,7 +652,7 @@ body>nav>div>a:hover { color: #a00; text-decoration: underline; }
         <%= content %>
       </div>
     </article>
-    <div class="powered">Powered by <a href="http://github.com/h15/gitty">Gitty</a> /
+    <div class="powered">Powered by <a href="http://github.com/bugov/gitty">Gitty</a> /
       <a href="http://mojolicio.us">Mojolicious</a> /
       <a href="http://perl.org">Perl</a>
     </div>
